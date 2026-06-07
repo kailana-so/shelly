@@ -1,0 +1,17 @@
+{
+  "name": "ghostty-warm",
+  "displayName": "Ghostty Warm",
+  "description": "VSCode theme derived from Ghostty terminal config",
+  "version": "1.0.0",
+  "engines": { "vscode": "^1.70.0" },
+  "categories": ["Themes"],
+  "contributes": {
+    "themes": [
+      {
+        "label": "Ghostty Warm",
+        "uiTheme": "vs-dark",
+        "path": "./themes/ghostty-warm.json"
+      }
+    ]
+  }
+}
