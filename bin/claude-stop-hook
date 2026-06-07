@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+cat > /dev/null  # consume stdin
+BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
+if [ -n "$TMUX" ]; then
+  tmux rename-window "✓ $BRANCH"
+fi
+exit 0

@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# Interactive multi-select prune of stale git worktrees (gum-based picker).
+# For removing a single worktree by name non-interactively, use `prunetree`.
+#
+# Usage: prunetrees [<repo>]
+#   <repo>  source repo path (defaults to cwd's git root)
+
+set -u
+
+MAIN_REPO=${1:-$(git rev-parse --show-toplevel 2>/dev/null || true)}
+if [[ -z "$MAIN_REPO" ]]; then
+  echo "prunetrees: no source repo (cd into a git repo or pass <repo> as the first arg)" >&2
+  exit 1
+fi
+MAIN_REPO=$(cd "$MAIN_REPO" && pwd)
+
+# Parse worktrees from porcelain output
+wt_paths=()
+wt_branches=()
+wt_prunable=()
+
+current_path=""
+current_branch=""
+current_prunable=false
+
+while IFS= read -r line; do
+  case "$line" in
+    "worktree "*)
+      if [[ -n "$current_path" && "$current_path" != "$MAIN_REPO" ]]; then
+        wt_paths+=("$current_path")
+        wt_branches+=("$current_branch")
+        wt_prunable+=("$current_prunable")
+      fi
+      current_path="${line#worktree }"
+      current_branch=""
+      current_prunable=false
+      ;;
+    "branch "*)
+      current_branch="${line#branch refs/heads/}"
+      ;;
+    "prunable"*)
+      current_prunable=true
+      ;;
+  esac
+done < <(git -C "$MAIN_REPO" worktree list --porcelain 2>/dev/null)
+
+if [[ -n "$current_path" && "$current_path" != "$MAIN_REPO" ]]; then
+  wt_paths+=("$current_path")
+  wt_branches+=("$current_branch")
+  wt_prunable+=("$current_prunable")
+fi
+
+if [[ ${#wt_paths[@]} -eq 0 ]]; then
+  echo "No worktrees to clean."
+  exit 0
+fi
+
+rows=()
+for i in "${!wt_paths[@]}"; do
+  name=$(basename "${wt_paths[$i]}")
+  branch="${wt_branches[$i]}"
+  [[ ${#branch} -gt 55 ]] && branch="${branch:0:52}..."
+  if [[ "${wt_prunable[$i]}" == true ]]; then
+    icon="✗"
+  else
+    icon="○"
+  fi
+  rows+=("$i $icon  $name  ($branch)")
+done
+
+selected=$(printf '%s\n' "${rows[@]}" | gum choose --no-limit \
+  --header "Select worktrees to remove  (✗ prunable  ○ active)  SPACE to select · ENTER to confirm")
+[[ -z "$selected" ]] && exit 0
+
+# Extract index from field 1 — safe even when gum truncates long names from the right
+to_remove_paths=()
+to_remove_names=()
+while IFS= read -r sel; do
+  [[ -z "$sel" ]] && continue
+  idx=$(echo "$sel" | awk '{print $1}')
+  [[ -z "$idx" || ! "$idx" =~ ^[0-9]+$ ]] && continue
+  to_remove_paths+=("${wt_paths[$idx]}")
+  to_remove_names+=("$(basename "${wt_paths[$idx]}")")
+done <<< "$selected"
+
+[[ ${#to_remove_names[@]} -eq 0 ]] && exit 0
+
+echo ""
+echo "Will remove:"
+for name in "${to_remove_names[@]}"; do
+  echo "  $name"
+done
+echo ""
+gum confirm "Remove ${#to_remove_names[@]} worktree(s)?" || exit 0
+
+for i in "${!to_remove_paths[@]}"; do
+  path="${to_remove_paths[$i]}"
+  name="${to_remove_names[$i]}"
+
+  if tmux has-session -t "$name" 2>/dev/null; then
+    echo "Killing tmux session: $name"
+    tmux kill-session -t "$name"
+  fi
+
+  echo "Removing worktree: $name"
+  git -C "$MAIN_REPO" worktree remove --force "$path" 2>&1 || \
+    echo "  Warning: git worktree remove failed, directory may need manual cleanup"
+done
+
+git -C "$MAIN_REPO" worktree prune
+echo "Done."

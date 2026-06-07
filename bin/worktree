@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Create or attach a git worktree under <repo-parent>/<repo>-builds/, in a tmux
+# session that auto-launches `claude` (so viewtrees/Claude hooks see it).
+#
+# Usage: worktree <name> [<repo>]
+#   <name>  branch / tmux session name (slashes become hyphens for the session id)
+#   <repo>  source repo path (defaults to cwd's git root)
+
+set -u
+
+NAME=${1:-}
+[[ -z "$NAME" ]] && { echo "Usage: worktree <name> [<repo>]" >&2; exit 1; }
+
+MAIN_REPO=${2:-$(git rev-parse --show-toplevel 2>/dev/null || true)}
+if [[ -z "$MAIN_REPO" ]]; then
+  echo "worktree: no source repo (cd into a git repo or pass <repo> as the second arg)" >&2
+  exit 1
+fi
+MAIN_REPO=$(cd "$MAIN_REPO" && pwd)
+
+PROJECT_NAME=$(basename "$MAIN_REPO")
+BUILDS_DIR="$(dirname "$MAIN_REPO")/${PROJECT_NAME}-builds"
+SESSION=$(echo "$NAME" | tr '/' '-')
+WORKTREE_PATH="$BUILDS_DIR/$SESSION"
+
+if tmux has-session -t "$SESSION" 2>/dev/null; then
+  [[ -n "${TMUX:-}" ]] && tmux switch-client -t "$SESSION" || tmux attach -t "$SESSION"
+else
+  if [[ ! -d "$WORKTREE_PATH" ]]; then
+    git -C "$MAIN_REPO" worktree add -b "$SESSION" "$WORKTREE_PATH" || exit 1
+    # Auto-copy .env files at root and one level deep (catches webclient/.env, server/.env, etc.)
+    for env_file in "$MAIN_REPO"/.env "$MAIN_REPO"/*/.env; do
+      [[ -f "$env_file" ]] || continue
+      rel="${env_file#$MAIN_REPO/}"
+      target="$WORKTREE_PATH/$rel"
+      mkdir -p "$(dirname "$target")"
+      cp "$env_file" "$target"
+    done
+  fi
+  tmux new-session -d -s "$SESSION" -c "$WORKTREE_PATH" "claude; exec $SHELL"
+  [[ -n "${TMUX:-}" ]] && tmux switch-client -t "$SESSION" || tmux attach -t "$SESSION"
+fi

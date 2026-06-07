@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Discovery helper — print the personal shell tools and what each one does.
+
+# Resolve symlinks so `tools` works whether invoked directly or via the
+# ~/.local/bin/ symlink, and shows the *actual* repo path on any machine.
+src="${BASH_SOURCE[0]}"
+while [[ -L "$src" ]]; do
+  dir="$(cd -P "$(dirname "$src")" && pwd)"
+  src="$(readlink "$src")"
+  [[ "$src" != /* ]] && src="$dir/$src"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$src")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+display_dir="${REPO_DIR/#$HOME/~}"
+
+if [[ -n "${NO_COLOR:-}" ]]; then
+  B="" D="" G="" T="" R=""
+else
+  B=$'\033[1m'
+  D=$'\033[90m'
+  G=$'\033[38;2;169;207;164m'
+  T=$'\033[38;2;102;153;204m'
+  R=$'\033[0m'
+fi
+
+cat <<EOF
+${B}${T}Personal shell tools${R}  ${D}(${display_dir}/)${R}
+
+  ${B}worktree${R} ${G}<name> [<repo>]${R}    Create/attach a git worktree under <parent>/<repo>-builds/, run claude in tmux
+  ${B}growtree${R}                    Spawn claude in a tmux session named after the current branch
+  ${B}viewtrees${R}                   fzf picker — navigate repos & tmux sessions in ~/Documents/
+  ${B}prunetree${R} ${G}<name> [<repo>]${R}   Remove one git worktree by name
+  ${B}prunetrees${R} ${G}[<repo>]${R}         Interactive multi-select prune of stale worktrees (gum)
+  ${B}tools${R}                       This list
+
+${B}${T}Claude Code hooks${R}  ${D}(referenced from ~/.claude/settings.json)${R}
+
+  ${B}claude-notify${R}              Notification → ⚡ tmux window + macOS notif
+  ${B}claude-stop-hook${R}           Stop → ✓ tmux window
+
+${D}Edit a tool: ${display_dir}/bin/<name>   ·   Re-run install.sh after pulling on a new machine.${R}
+EOF

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+input=$(timeout 2 cat 2>/dev/null || true)
+BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
+MSG=$(echo "${input:-{}}" | jq -r '.message // "Claude needs your attention"' 2>/dev/null || echo "Claude needs your attention")
+
+if [ -n "$TMUX" ]; then
+  tmux rename-window "⚡ $BRANCH"
+fi
+
+osascript \
+  -e "display notification \"$MSG\" with title \"Claude Code — $BRANCH\" sound name \"Glass\"" \
+  -e 'tell application "Ghostty" to activate'
+exit 0

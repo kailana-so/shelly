@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Remove one specific git worktree by name (basename of the worktree dir, or
+# the branch name). For an interactive multi-select picker, use `prunetrees`.
+#
+# Usage: prunetree <name> [<repo>]
+#   <name>  worktree dir basename or branch name
+#   <repo>  source repo path (defaults to cwd's git root)
+
+set -u
+
+NAME=${1:-}
+[[ -z "$NAME" ]] && { echo "Usage: prunetree <name> [<repo>]" >&2; exit 1; }
+
+MAIN_REPO=${2:-$(git rev-parse --show-toplevel 2>/dev/null || true)}
+if [[ -z "$MAIN_REPO" ]]; then
+  echo "prunetree: no source repo (cd into a git repo or pass <repo> as the second arg)" >&2
+  exit 1
+fi
+MAIN_REPO=$(cd "$MAIN_REPO" && pwd)
+
+# Walk worktree list looking for a match
+target_path=""
+target_branch=""
+target_prunable=false
+current_path=""
+current_branch=""
+current_prunable=false
+
+_check_match() {
+  if [[ "$(basename "$current_path")" == "$NAME" || "$current_branch" == "$NAME" ]]; then
+    target_path="$current_path"
+    target_branch="$current_branch"
+    target_prunable="$current_prunable"
+  fi
+}
+
+while IFS= read -r line; do
+  case "$line" in
+    "worktree "*)
+      [[ -n "$current_path" ]] && _check_match
+      current_path="${line#worktree }"
+      current_branch=""
+      current_prunable=false
+      ;;
+    "branch "*)
+      current_branch="${line#branch refs/heads/}"
+      ;;
+    "prunable"*)
+      current_prunable=true
+      ;;
+  esac
+done < <(git -C "$MAIN_REPO" worktree list --porcelain 2>/dev/null)
+[[ -n "$current_path" ]] && _check_match
+
+if [[ -z "$target_path" ]]; then
+  echo "prunetree: no worktree matches '$NAME' in $MAIN_REPO" >&2
+  exit 1
+fi
+
+if [[ "$target_path" == "$MAIN_REPO" ]]; then
+  echo "prunetree: refusing to remove the main worktree ($MAIN_REPO)" >&2
+  exit 1
+fi
+
+icon="○"
+$target_prunable && icon="✗"
+
+echo "About to remove:"
+echo "  $icon  $(basename "$target_path")  ($target_branch)"
+echo "  path: $target_path"
+
+gum confirm "Remove?" || exit 0
+
+# Kill matching tmux session if present
+session=$(basename "$target_path")
+if tmux has-session -t "$session" 2>/dev/null; then
+  tmux kill-session -t "$session"
+  echo "Killed tmux session: $session"
+fi
+
+git -C "$MAIN_REPO" worktree remove --force "$target_path"
+git -C "$MAIN_REPO" worktree prune
+echo "Done."
